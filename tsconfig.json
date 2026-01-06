@@ -4,25 +4,25 @@
     "module": "ESNext",
     "lib": ["ES2020"],
     "moduleResolution": "node",
-    
+
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    
+
     "outDir": "./dist",
     "rootDir": "./src",
-    
+
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck":  true,
+    "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    
+
     "noUnusedLocals": true,
-    "noUnusedParameters":  true,
+    "noUnusedParameters": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "tests/unit/auth"],
   "exclude": ["node_modules", "dist", "tests", "**/*.test.ts"]
 }
