@@ -16,7 +16,7 @@ export class InPostAPIError extends InPostError {
     message: string,
     statusCode: number,
     response: ErrorData,
-    requestId?: string
+    requestId?: string,
   ) {
     super(message);
     this.name = 'InPostAPIError';
@@ -26,8 +26,15 @@ export class InPostAPIError extends InPostError {
     Object.setPrototypeOf(this, InPostAPIError.prototype);
   }
 
+  AUTH_ERRORS = [401, 403];
+  SERVER_ERRORS = [500, 502, 503, 504];
+
+  get isBadRequestError(): boolean {
+    return this.statusCode === 400;
+  }
+
   get isAuthError(): boolean {
-    return this.statusCode === 401 || this.statusCode === 403;
+    return this.AUTH_ERRORS.includes(this.statusCode);
   }
 
   get isNotFoundError(): boolean {
@@ -35,7 +42,7 @@ export class InPostAPIError extends InPostError {
   }
 
   get isValidationError(): boolean {
-    return this.statusCode === 400 || this.statusCode === 422;
+    return this.statusCode === 422;
   }
 
   get isRateLimitError(): boolean {
@@ -43,7 +50,7 @@ export class InPostAPIError extends InPostError {
   }
 
   get isServerError(): boolean {
-    return this.statusCode >= 500 && this.statusCode < 600;
+    return this.SERVER_ERRORS.includes(this.statusCode);
   }
 }
 
