@@ -23,6 +23,6 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*", "tests/unit/auth"],
+  "include": ["src/**/*", "tests/unit/**/*.ts"],
   "exclude": ["node_modules", "dist", "tests", "**/*.test.ts"]
 }
