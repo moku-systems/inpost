@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import { InPostAPIError } from '../utils/errors';
 import type { InPostConfig } from '../types/common';
 import { AuthManager } from '../auth/AuthManager';
-import { DEFAULT_CONFIG } from '../utils/config/defaults';
+import { DEFAULT_CONFIG, RETRY_CONFIG } from '../utils/config/defaults';
 import { ErrorData } from '../types/error';
 import { CommonApiErrorResponse } from '../types/api/errors';
 import { buildUrl } from '../utils/api';
@@ -11,10 +11,17 @@ export class InPostClient {
   private readonly httpClient: AxiosInstance;
   private readonly authManager: AuthManager;
   private readonly environment: 'sandbox' | 'production';
+  private readonly maxRetries: number;
+  private readonly retryDelay: number;
+  private readonly retryableStatusCodes: readonly number[];
 
   constructor(config: InPostConfig) {
     this.authManager = new AuthManager(config);
     this.environment = config.environment;
+    this.maxRetries = config.maxRetries ?? RETRY_CONFIG.maxRetries;
+    this.retryDelay = config.retryDelay ?? RETRY_CONFIG.retryDelay;
+    this.retryableStatusCodes =
+      config.retryableStatusCodes ?? RETRY_CONFIG.retryableStatusCodes;
 
     const baseURL = buildUrl(this.environment, '');
 
@@ -28,6 +35,9 @@ export class InPostClient {
     this.setupInterceptor();
   }
 
+  /**
+   * Setup Axios interceptors for request and response handling
+   */
   private setupInterceptor(): void {
     //Add access token to each request
     this.httpClient.interceptors.request.use(
@@ -36,28 +46,46 @@ export class InPostClient {
         config.headers.Authorization = `Bearer ${accessToken}`;
         return config;
       },
-      error => {
-        return Promise.reject(error);
-      },
+      error => Promise.reject(error),
     );
+
     // RESPONSE INTERCEPTOR - Handle errors
     this.httpClient.interceptors.response.use(
-      response => {
-        return response;
-      },
+      response => response,
       async (error: AxiosError) => {
-        // Handle 401 (token expired during request)
-        if (error.response?.status === 401) {
-          const config = error.config;
-          // Clear token and retry once
-          if (config && !config.headers['x-retry-count']) {
-            this.authManager.clearToken();
+        const config = error.config;
+        const status = error.response?.status;
 
-            config.headers = config.headers || {};
-            config.headers['x-retry-count'] = '1';
-            // Retry with new token
-            return this.httpClient.request(config);
-          }
+        if (!config || !status) {
+          return Promise.reject(this.handleError(error));
+        }
+
+        // Get current retry count from headers (default to 0)
+        const retryCount = parseInt(config.headers['x-retry-count'] || 0);
+
+        // Handle 401 (token expired during request) - retry once after refreshing token
+        if (status === 401 && retryCount === 0) {
+          this.authManager.clearToken();
+
+          config.headers = config.headers || {};
+          config.headers['x-retry-count'] = '1';
+          // Retry with new token
+          return this.httpClient.request(config);
+        }
+
+        if (
+          status &&
+          this.retryableStatusCodes.includes(status) &&
+          retryCount < this.maxRetries
+        ) {
+          const delay = this.calculateRetryDelay(retryCount, status);
+          await this.sleep(delay);
+          // Increment retry count
+          config.headers = config.headers || {};
+          config.headers['x-retry-count'] = String(retryCount + 1);
+
+          // Retry the request
+          return this.httpClient.request(config);
         }
 
         return Promise.reject(this.handleError(error));
@@ -65,6 +93,34 @@ export class InPostClient {
     );
   }
 
+  /**
+   * Calculate retry delay using exponential backoff strategy
+   * @param retryCount - Current retry attempt count
+   * @param status - HTTP status code of the failed request
+   * @returns Delay in milliseconds before the next retry attempt
+   */
+  private calculateRetryDelay(retryCount: number, status: number): number {
+    // For 429 Too Many Requests, use exponential backoff with an additional fixed delay to help mitigate rate limits
+    if (status === 429) {
+      return this.retryDelay * Math.pow(2, retryCount);
+    }
+    return this.retryDelay * (retryCount + 1);
+  }
+
+  /**
+   * Delay execution for a specified number of milliseconds
+   * @param ms - Number of milliseconds to sleep
+   * @returns Promise that resolves after the specified delay
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Handle errors from Axios and convert them to InPostAPIError with normalized error data
+   * @param error - AxiosError object
+   * @returns InPostAPIError instance
+   */
   private handleError(error: AxiosError): InPostAPIError {
     if (error.response) {
       const { status, data, headers } = error.response;
@@ -110,11 +166,14 @@ export class InPostClient {
           errorNormalized.type = errorData.type;
         }
         if (Array.isArray(errorData.errors)) {
-          errorData.errors.map(err => {
+          errorData.errors.forEach(err => {
             errorNormalized.errors.push({ detail: err, type: 'unknown' });
           });
-        }
-        if (errorData.errors && typeof errorData.errors === 'object') {
+        } else if (
+          errorData.errors &&
+          typeof errorData.errors === 'object' &&
+          !Array.isArray(errorData.errors)
+        ) {
           Object.entries(errorData.errors).flatMap(
             ([field, messages]: [string, string[]]) => {
               messages.forEach(msg => {

@@ -31,7 +31,7 @@ const BASE_REQUEST_CONFIG: Partial<InternalAxiosRequestConfig> = {
 
 const RETRIED_REQUEST_CONFIG: Partial<InternalAxiosRequestConfig> = {
   ...BASE_REQUEST_CONFIG,
-  headers: { 'x-retry-count': '1' } as any,
+  headers: { 'x-retry-count': '3' } as any,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -445,5 +445,110 @@ describe('InPostClient', () => {
         });
       },
     );
+  });
+
+  describe('Response Interceptor - Retry Logic', () => {
+    describe('Retryable errors (429, 5xx)', () => {
+      beforeEach(() => {
+        // Mock sleep to avoid delays in tests
+        jest.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+      });
+
+      it('should retry 429 (rate limit) with exponential backoff', async () => {
+        const sleepSpy = jest.spyOn(client as any, 'sleep');
+
+        mockAxiosInstance.request.mockResolvedValue({
+          data: { success: true },
+        });
+
+        // Simulate 3 sequential retries with increasing retry counts
+        // and verify that sleep is called with exponential delays:
+        // delay = retryDelay(1000) * 2^retryCount
+        for (const [retryCount, expectedDelay] of [
+          [0, 1000], // 1000 * 2^0
+          [1, 2000], // 1000 * 2^1
+          [2, 4000], // 1000 * 2^2
+        ] as const) {
+          sleepSpy.mockClear();
+
+          const axiosError = createAxiosError({
+            status: 429,
+            data: { message: 'Rate limit exceeded for InPost API.' },
+            statusText: 'Too Many Requests',
+            config: {
+              ...BASE_REQUEST_CONFIG,
+              headers:
+                retryCount > 0
+                  ? ({ 'x-retry-count': String(retryCount) } as any)
+                  : ({} as any),
+            },
+          });
+
+          await responseInterceptorError(axiosError);
+
+          expect(sleepSpy).toHaveBeenCalledTimes(1);
+          expect(sleepSpy).toHaveBeenCalledWith(expectedDelay);
+        }
+      });
+
+      it('should retry 503 (service unavailable) up to maxRetries', async () => {
+        const axiosError = createAxiosError({
+          status: 503,
+          data: { message: 'InPost API server error.' },
+          statusText: 'Service Unavailable',
+          config: { ...BASE_REQUEST_CONFIG, headers: {} as any },
+        });
+
+        // Mock successful retry
+        mockAxiosInstance.request.mockResolvedValue({
+          data: { success: true },
+        });
+
+        const result = await responseInterceptorError(axiosError);
+
+        expect(mockAxiosInstance.request).toHaveBeenCalledTimes(1);
+        expect(mockAxiosInstance.request).toHaveBeenCalledWith(
+          expect.objectContaining({
+            headers: expect.objectContaining({
+              'x-retry-count': '1',
+            }),
+          }),
+        );
+        expect(result).toEqual({ data: { success: true } });
+      });
+
+      it('should NOT retry after maxRetries reached', async () => {
+        const axiosError = createAxiosError({
+          status: 503,
+          data: { detail: 'Service unavailable' },
+          statusText: 'Service Unavailable',
+          config: {
+            ...BASE_REQUEST_CONFIG,
+            headers: { 'x-retry-count': '3' } as any,
+          }, // Simulate max retries reached
+        });
+
+        await expect(responseInterceptorError(axiosError)).rejects.toThrow(
+          InPostAPIError,
+        );
+
+        expect(mockAxiosInstance.request).not.toHaveBeenCalled();
+      });
+
+      it('should NOT retry 400 (bad request)', async () => {
+        const axiosError = createAxiosError({
+          status: 400,
+          data: { detail: 'Bad request' },
+          statusText: 'Bad Request',
+          config: BASE_REQUEST_CONFIG,
+        });
+
+        await expect(responseInterceptorError(axiosError)).rejects.toThrow(
+          InPostAPIError,
+        );
+
+        expect(mockAxiosInstance.request).not.toHaveBeenCalled();
+      });
+    });
   });
 });

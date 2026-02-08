@@ -11,6 +11,8 @@ export class InPostAPIError extends InPostError {
   public readonly statusCode: number;
   public readonly response: ErrorData;
   public readonly requestId?: string;
+  private readonly AUTH_ERRORS = [401, 403];
+  private readonly SERVER_ERRORS = [500, 502, 503, 504];
 
   constructor(
     message: string,
@@ -25,9 +27,6 @@ export class InPostAPIError extends InPostError {
     this.requestId = requestId;
     Object.setPrototypeOf(this, InPostAPIError.prototype);
   }
-
-  AUTH_ERRORS = [401, 403];
-  SERVER_ERRORS = [500, 502, 503, 504];
 
   get isBadRequestError(): boolean {
     return this.statusCode === 400;
