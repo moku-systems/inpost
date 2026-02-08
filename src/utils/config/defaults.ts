@@ -11,10 +11,24 @@ export const DEFAULT_CONFIG = {
 } as const;
 
 /**
+ * HTTP methods considered idempotent and safe to retry automatically.
+ * Non-idempotent methods (POST, PATCH) are excluded by default to prevent
+ * duplicate side effects (e.g., duplicate creates/charges/shipments).
+ */
+export const IDEMPOTENT_HTTP_METHODS = [
+  'GET',
+  'HEAD',
+  'PUT',
+  'DELETE',
+  'OPTIONS',
+] as const;
+
+/**
  * Retry configuration
  */
 export const RETRY_CONFIG = {
   maxRetries: 3,
   retryDelay: 1000, // 1 second (in milliseconds)
   retryableStatusCodes: [408, 429, 500, 502, 503, 504],
+  retryableHttpMethods: IDEMPOTENT_HTTP_METHODS,
 } as const;
