@@ -11,8 +11,8 @@ export class InPostAPIError extends InPostError {
   public readonly statusCode: number;
   public readonly response: ErrorData;
   public readonly requestId?: string;
-  private readonly AUTH_ERRORS = [401, 403];
-  private readonly SERVER_ERRORS = [500, 502, 503, 504];
+  private static readonly AUTH_ERRORS = [401, 403];
+  private static readonly SERVER_ERRORS = [500, 502, 503, 504];
 
   constructor(
     message: string,
@@ -33,7 +33,7 @@ export class InPostAPIError extends InPostError {
   }
 
   get isAuthError(): boolean {
-    return this.AUTH_ERRORS.includes(this.statusCode);
+    return InPostAPIError.AUTH_ERRORS.includes(this.statusCode);
   }
 
   get isNotFoundError(): boolean {
@@ -49,7 +49,7 @@ export class InPostAPIError extends InPostError {
   }
 
   get isServerError(): boolean {
-    return this.SERVER_ERRORS.includes(this.statusCode);
+    return InPostAPIError.SERVER_ERRORS.includes(this.statusCode);
   }
 }
 
