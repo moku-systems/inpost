@@ -1,20 +1,30 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
-import { InPostAPIError } from '../utils/errors';
 import type { InPostConfig } from '../types/common';
 import { AuthManager } from '../auth/AuthManager';
-import { DEFAULT_CONFIG } from '../utils/config/defaults';
-import { ErrorData } from '../types/error';
-import { CommonApiErrorResponse } from '../types/api/errors';
+import { DEFAULT_CONFIG, RETRY_CONFIG } from '../utils/config/defaults';
 import { buildUrl } from '../utils/api';
+import { handleError } from './errorHandler';
+import { calculateRetryDelay, sleep, isMethodRetryable } from './retryStrategy';
 
 export class InPostClient {
   private readonly httpClient: AxiosInstance;
   private readonly authManager: AuthManager;
   private readonly environment: 'sandbox' | 'production';
+  private readonly maxRetries: number;
+  private readonly retryDelay: number;
+  private readonly retryableStatusCodes: readonly number[];
+  private readonly retryableHttpMethods: readonly string[];
 
   constructor(config: InPostConfig) {
     this.authManager = new AuthManager(config);
     this.environment = config.environment;
+    this.maxRetries = config.maxRetries ?? RETRY_CONFIG.maxRetries;
+    this.retryDelay = config.retryDelay ?? RETRY_CONFIG.retryDelay;
+    this.retryableStatusCodes =
+      config.retryableStatusCodes ?? RETRY_CONFIG.retryableStatusCodes;
+    this.retryableHttpMethods = (
+      config.retryableHttpMethods ?? RETRY_CONFIG.retryableHttpMethods
+    ).map(m => m.toUpperCase());
 
     const baseURL = buildUrl(this.environment, '');
 
@@ -28,6 +38,9 @@ export class InPostClient {
     this.setupInterceptor();
   }
 
+  /**
+   * Setup Axios interceptors for request and response handling
+   */
   private setupInterceptor(): void {
     //Add access token to each request
     this.httpClient.interceptors.request.use(
@@ -36,111 +49,61 @@ export class InPostClient {
         config.headers.Authorization = `Bearer ${accessToken}`;
         return config;
       },
-      error => {
-        return Promise.reject(error);
-      },
+      error => Promise.reject(error),
     );
+
     // RESPONSE INTERCEPTOR - Handle errors
     this.httpClient.interceptors.response.use(
-      response => {
-        return response;
-      },
+      response => response,
       async (error: AxiosError) => {
-        // Handle 401 (token expired during request)
-        if (error.response?.status === 401) {
-          const config = error.config;
-          // Clear token and retry once
-          if (config && !config.headers['x-retry-count']) {
-            this.authManager.clearToken();
+        const config = error.config;
+        const status = error.response?.status;
 
-            config.headers = config.headers || {};
-            config.headers['x-retry-count'] = '1';
-            // Retry with new token
-            return this.httpClient.request(config);
-          }
+        if (!config || !status) {
+          return Promise.reject(handleError(error));
         }
 
-        return Promise.reject(this.handleError(error));
-      },
-    );
-  }
-
-  private handleError(error: AxiosError): InPostAPIError {
-    if (error.response) {
-      const { status, data, headers } = error.response;
-      const requestId = headers['x-request-id'] as string | undefined;
-
-      let message = 'Unknown error occurred';
-      switch (status) {
-        case 400:
-          message = 'Invalid request to InPost API.';
-          break;
-        case 422:
-          message = 'Validation error from InPost API.';
-          break;
-        case 401:
-        case 403:
-          message = 'Unauthorized access to InPost API.';
-          break;
-        case 404:
-          message = 'Requested resource not found in InPost API.';
-          break;
-        case 429:
-          message = 'Rate limit exceeded for InPost API.';
-          break;
-        case 500:
-        case 502:
-        case 503:
-        case 504:
-          message = 'InPost API server error.';
-          break;
-        default:
-          break;
-      }
-
-      let errorNormalized: ErrorData = {
-        message,
-        errors: [],
-      };
-
-      if (typeof data === 'object' && data !== null) {
-        const errorData: CommonApiErrorResponse = data as any;
-        if (errorData.detail) {
-          errorNormalized.message = errorData.detail;
-          errorNormalized.type = errorData.type;
+        let retryCount = 0;
+        // Get current retry count from headers
+        const rawRetryHeader = (config.headers as any)?.['x-retry-count'];
+        if (Boolean(rawRetryHeader)) {
+          const parsedRetryCountHeader = parseInt(rawRetryHeader, 10);
+          retryCount = isNaN(parsedRetryCountHeader)
+            ? 0
+            : parsedRetryCountHeader;
         }
-        if (Array.isArray(errorData.errors)) {
-          errorData.errors.map(err => {
-            errorNormalized.errors.push({ detail: err, type: 'unknown' });
-          });
+
+        // Handle 401 (token expired during request) - retry once after refreshing token
+        if (status === 401 && retryCount === 0) {
+          this.authManager.clearToken();
+
+          config.headers = config.headers || {};
+          config.headers['x-retry-count'] = '1';
+          // Retry with new token
+          return this.httpClient.request(config);
         }
-        if (errorData.errors && typeof errorData.errors === 'object') {
-          Object.entries(errorData.errors).flatMap(
-            ([field, messages]: [string, string[]]) => {
-              messages.forEach(msg => {
-                errorNormalized.errors.push({ detail: field, type: msg });
-              });
-            },
+
+        if (
+          status &&
+          this.retryableStatusCodes.includes(status) &&
+          retryCount < this.maxRetries &&
+          isMethodRetryable(config.method, this.retryableHttpMethods)
+        ) {
+          const delay = calculateRetryDelay(
+            this.retryDelay,
+            retryCount,
+            status,
           );
+          await sleep(delay);
+          // Increment retry count
+          config.headers = config.headers || {};
+          config.headers['x-retry-count'] = String(retryCount + 1);
+
+          // Retry the request
+          return this.httpClient.request(config);
         }
-      }
 
-      return new InPostAPIError(message, status, errorNormalized, requestId);
-    }
-
-    if (error.request) {
-      return new InPostAPIError('No response from InPost API.', 500, {
-        message: 'No response received',
-        errors: [],
-      });
-    }
-
-    return new InPostAPIError(
-      error.message || 'Unexpected error occurred.',
-      error!.status || 500,
-      {
-        message: error.message,
-        errors: [{ detail: error.stack || 'Unexpected error occurred.' }],
+        return Promise.reject(handleError(error));
       },
     );
   }
