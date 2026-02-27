@@ -71,7 +71,7 @@
     "prepublishOnly": "npm run validate && npm run build"
   },
   "dependencies": {
-    "axios": "^1.13.2"
+    "axios": "^1.13.6"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
