@@ -1,9 +1,10 @@
 {
-  "name": "@moku-systems/inpost",
+  "name": "@moku-systems/inpost-international",
   "version": "0.1.0",
   "description": "Unofficial TypeScript SDK for InPost International API (developers.inpost-group.com)",
   "keywords": [
     "inpost",
+    "international",
     "shipping",
     "courier",
     "parcel",
@@ -14,6 +15,7 @@
     "typescript",
     "unofficial"
   ],
+  "private": true,
   "author": {
     "name": "Moku Systems",
     "email": "support@moku-systems.com"
@@ -21,12 +23,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/moku-systems/inpost.git"
+    "url": "https://github.com/moku-systems/inpost-international.git"
   },
   "bugs": {
-    "url": "https://github.com/moku-systems/inpost/issues"
+    "url": "https://github.com/moku-systems/inpost-international/issues"
   },
-  "homepage": "https://github.com/moku-systems/inpost#readme",
+  "homepage": "https://github.com/moku-systems/inpost-international#readme",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
@@ -69,7 +71,7 @@
     "prepublishOnly": "npm run validate && npm run build"
   },
   "dependencies": {
-    "axios": "^1.13.2"
+    "axios": "^1.13.6"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
