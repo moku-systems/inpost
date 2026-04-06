@@ -1,5 +1,3 @@
-cat > README.md << 'EOF'
-
 # @moku-systems/inpost-international
 
 > InPost International API client for Node.js with OAuth2 authentication
