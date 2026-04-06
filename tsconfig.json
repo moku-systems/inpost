@@ -3,7 +3,8 @@
     "target": "ES2020",
     "module": "ESNext",
     "lib": ["ES2020"],
-    "moduleResolution": "node",
+    "moduleResolution": "node10",
+    "ignoreDeprecations": "6.0",
 
     "declaration": true,
     "declarationMap": true,
@@ -21,7 +22,8 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "types": ["node"]
   },
   "include": ["src/**/*", "tests/unit/**/*.ts"],
   "exclude": ["node_modules", "dist", "tests", "**/*.test.ts"]
